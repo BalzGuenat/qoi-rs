@@ -36,15 +36,15 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
     }
 
     let mut prev_pixel: Rgba<u8> = Rgba::from([0, 0, 0, 255]);
-    // let previous: [[u8; 4]; 64] = [[0, 0, 0, 255]; 64];
-    let mut previous: [Rgba<u8>; 64] = [Rgba::from([0, 0, 0, 255]); 64];
+    let mut previous: [Rgba<u8>; 64] = [Rgba::from([0, 0, 0, 0]); 64];
 
     let mut run = 0u8;
 
     let mut num_chunks: u32 = 0;
+    let mut num_pixel: u32 = 0;
 
     for pixel in buf.pixels() {
-        // println!("next pixel");
+        num_pixel += 1;
         let idx = index_position(pixel);
 
         if prev_pixel.eq(pixel) {
@@ -54,7 +54,13 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
                 // stop max length run
                 encode_stream.push(chunk_qoi_op_run(run));
                 num_chunks += 1;
-                println!("{} run ({})", num_chunks, run);
+                // println!(
+                //     "{} run ({}) @{}-{}",
+                //     num_chunks,
+                //     run,
+                //     num_pixel + 1 - run as u32,
+                //     num_pixel
+                // );
                 run = 0;
             }
             continue;
@@ -62,7 +68,13 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
             // stop current run
             encode_stream.push(chunk_qoi_op_run(run));
             num_chunks += 1;
-            println!("{} run ({})", num_chunks, run);
+            // println!(
+            //     "{} run ({}) @{}-{}",
+            //     num_chunks,
+            //     run,
+            //     num_pixel - run as u32,
+            //     num_pixel - 1
+            // );
             run = 0;
         }
 
@@ -70,7 +82,7 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
             // reference index
             encode_stream.push(chunk_qoi_op_index(idx));
             num_chunks += 1;
-            println!("{} index", num_chunks);
+            // println!("{} index @{}", num_chunks, num_pixel);
 
             prev_pixel = *pixel;
             continue;
@@ -88,7 +100,7 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
                 // diff
                 encode_stream.push(chunk_qoi_op_diff(dr, dg, db));
                 num_chunks += 1;
-                println!("{} diff", num_chunks);
+                // println!("{} diff @{}", num_chunks, num_pixel);
                 continue;
             }
 
@@ -98,7 +110,7 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
                     encode_stream.push(ele);
                 }
                 num_chunks += 1;
-                println!("{} luma", num_chunks);
+                // println!("{} luma @{}", num_chunks, num_pixel);
                 continue;
             }
 
@@ -107,7 +119,7 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
                 encode_stream.push(ele);
             }
             num_chunks += 1;
-            println!("{} rgb", num_chunks);
+            // println!("{} rgb @{}", num_chunks, num_pixel);
             continue;
         }
 
@@ -118,17 +130,17 @@ pub fn encode(bitmap: DynamicImage) -> Qoi {
             encode_stream.push(ele);
         }
         num_chunks += 1;
-        println!("{} rgba", num_chunks);
+        // println!("{} rgba @{}", num_chunks, num_pixel);
     }
 
     if run > 0 {
         // stop current run
         encode_stream.push(chunk_qoi_op_run(run));
         num_chunks += 1;
-        println!("{} run ({})", num_chunks, run);
+        // println!("{} run ({}) @{}", num_chunks, run, num_pixel);
     }
 
-    println!("num_chunks = {}", num_chunks);
+    // println!("num_chunks = {}", num_chunks);
 
     let footer: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 1];
     for ele in footer {
@@ -154,7 +166,7 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
 
     // let mut prev_pixel = Rgba::from([Wrapping(0u8), Wrapping(0), Wrapping(0), Wrapping(255)]);
     let mut prev_pixel: Rgba<u8> = Rgba::from([0, 0, 0, 255]);
-    let mut previous = [prev_pixel; 64];
+    let mut previous = [Rgba::from([0, 0, 0, 0]); 64];
 
     let mut buf_iter = encoded_image.buf[14..].iter();
     let mut pixel_iter = image.pixels_mut();
@@ -163,28 +175,27 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
 
     while processed_pixels < header.width * header.height {
         num_chunks += 1;
-        println!(
-            "next chunk {} ({}/{} pixels)",
-            num_chunks,
-            processed_pixels,
-            header.width * header.height
-        );
+        // // println!(
+        //     "next chunk {} ({}/{} pixels)",
+        //     num_chunks,
+        //     processed_pixels,
+        //     header.width * header.height
+        // );
         let b1 = *buf_iter.next().unwrap();
 
         if b1 >> 6 == 0b00 {
             // index
-            println!("{} index", num_chunks);
             let idx = b1 & 0b0011_1111;
             let px = pixel_iter.next().unwrap();
             prev_pixel = previous[usize::from(idx)];
             *px = prev_pixel;
             processed_pixels += 1;
+            // println!("{} index @{}", num_chunks, processed_pixels);
             continue;
         }
 
         if b1 >> 6 == 0b01 {
             // diff
-            println!("{} diff", num_chunks);
             let dr = ((b1 >> 4) & 0b11) - 2;
             let dg = ((b1 >> 2) & 0b11) - 2;
             let db = (b1 & 0b11) - 2;
@@ -196,12 +207,12 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
             let px = pixel_iter.next().unwrap();
             *px = prev_pixel;
             processed_pixels += 1;
+            // println!("{} diff @{}", num_chunks, processed_pixels);
             continue;
         }
 
         if b1 >> 6 == 0b10 {
             // luma
-            println!("{} luma", num_chunks);
             let dg = (b1 & 0b0011_1111) - 32;
 
             let b2 = *buf_iter.next().unwrap();
@@ -218,13 +229,13 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
             let px = pixel_iter.next().unwrap();
             *px = prev_pixel;
             processed_pixels += 1;
+            // println!("{} luma @{}", num_chunks, processed_pixels);
             continue;
         }
 
         if (b1 & 0b1111_1110) != 0b1111_1110 {
             // run
             let run = (b1 & 0b0011_1111) + 1;
-            println!("{} run ({})", num_chunks, run);
             for i in 0..run {
                 let px;
                 match pixel_iter.next() {
@@ -237,12 +248,18 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
                 *px = prev_pixel;
             }
             processed_pixels += run as u32;
+            // println!(
+            //     "{} run ({}) @{}-{}",
+            //     num_chunks,
+            //     run,
+            //     processed_pixels + 1 - run as u32,
+            //     processed_pixels
+            // );
             continue;
         }
 
         if b1 == 0b1111_1110 {
             // rgb
-            println!("{} rgb", num_chunks);
             let r = *buf_iter.next().unwrap();
             let g = *buf_iter.next().unwrap();
             let b = *buf_iter.next().unwrap();
@@ -254,12 +271,12 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
             let px = pixel_iter.next().unwrap();
             *px = prev_pixel;
             processed_pixels += 1;
+            // println!("{} rgb @{}", num_chunks, processed_pixels);
             continue;
         }
 
         if b1 == 0b1111_1111 {
             // rgba
-            println!("{} rgba", num_chunks);
             let r = *buf_iter.next().unwrap();
             let g = *buf_iter.next().unwrap();
             let b = *buf_iter.next().unwrap();
@@ -271,6 +288,7 @@ pub fn decode(encoded_image: Qoi) -> DynamicImage {
             let px = pixel_iter.next().unwrap();
             *px = prev_pixel;
             processed_pixels += 1;
+            // println!("{} rgba @{}", num_chunks, processed_pixels);
             continue;
         }
     }
@@ -340,7 +358,7 @@ fn decode_header(buf: &Vec<u8>) -> QoiHeader {
     let width_bytes = buf[4..8].try_into().unwrap();
     let width = transform_array_of_u8_to_u32(width_bytes);
 
-    let height_bytes = buf[4..8].try_into().unwrap();
+    let height_bytes = buf[8..12].try_into().unwrap();
     let height = transform_array_of_u8_to_u32(height_bytes);
 
     return QoiHeader {

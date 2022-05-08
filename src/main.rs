@@ -1,4 +1,5 @@
 mod qoi;
+mod qomf;
 
 use std::fs::File;
 use std::io::Read;
